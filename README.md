@@ -36,15 +36,13 @@ When a user places an order, the API server publishes the order ID to a Redis Pu
 
 ---
 
-## Why Pub/Sub (Not a Job Queue)
-
-This project uses **Redis Pub/Sub** intentionally, not `LPUSH`/`BRPOP` queue semantics.
+## Why Pub/Sub
 
 **Pub/Sub fan-out** is the right pattern here because every order needs to be processed by **all three** services simultaneously. A work queue (`BRPOP`) delivers each job to exactly **one** competing consumer — which would mean only one service processes each order.
 
 | Pattern | Delivery | Use Case |
 |---------|----------|----------|
-| **Pub/Sub** (this project) | Every subscriber gets every message | Fan-out to multiple independent services |
+| **Pub/Sub** | Every subscriber gets every message | Fan-out to multiple independent services |
 | **Work Queue** (`BRPOP`) | One consumer per message | Load balancing across identical workers |
 
 ---
@@ -226,9 +224,3 @@ This is a learning project built from first principles. The following are intent
 - **No persistence for messages** — Redis Pub/Sub is fire-and-forget
 
 For production, consider Redis Streams with consumer groups, BullMQ, RabbitMQ, or Kafka.
-
----
-
-## License
-
-ISC
