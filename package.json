@@ -1,0 +1,31 @@
+{
+  "name": "redis-pubsub-order-pipeline",
+  "version": "2.0.0",
+  "description": "A distributed order processing pipeline using Redis Pub/Sub fan-out with multiple independent worker services.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "worker:email": "tsx src/EmailService/main.ts",
+    "worker:analytics": "tsx src/AnalyticService/main.ts",
+    "worker:inventory": "tsx src/InventoryUpdatedService/main.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "ioredis": "^5.11.1",
+    "uuid": "^14.0.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.1.2",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  }
+}

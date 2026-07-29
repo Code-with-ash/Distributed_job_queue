@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redis PubSub Order Pipeline</title>
+  <meta name="description" content="A distributed order processing pipeline using Redis Pub/Sub fan-out with real-time dashboard.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- animated background blobs -->
+  <div class="bg-blur bg-blur-1"></div>
+  <div class="bg-blur bg-blur-2"></div>
+  <div class="bg-blur bg-blur-3"></div>
+
+  <div class="container">
+
+    <!-- header -->
+    <header class="header">
+      <div class="header-badge">⚡ Redis Pub/Sub</div>
+      <h1>Order Pipeline</h1>
+      <p class="subtitle">Place orders and watch workers process them in real time</p>
+    </header>
+
+    <!-- architecture strip -->
+    <div class="arch-strip">
+      <div class="arch-node">
+        <span class="arch-icon">🛒</span>
+        <span>API</span>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node arch-redis">
+        <span class="arch-icon">📡</span>
+        <span>Redis Pub/Sub</span>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node">
+        <span class="arch-icon">📧</span>
+        <span>Email</span>
+      </div>
+      <div class="arch-node">
+        <span class="arch-icon">📊</span>
+        <span>Analytics</span>
+      </div>
+      <div class="arch-node">
+        <span class="arch-icon">📦</span>
+        <span>Inventory</span>
+      </div>
+    </div>
+
+    <!-- order form -->
+    <div class="card glass" id="order-form-card">
+      <div class="card-header">
+        <h2>Place an Order</h2>
+        <span class="card-tag">Producer</span>
+      </div>
+      <div class="items-grid">
+        <label class="item-checkbox" id="item-laptop">
+          <input type="checkbox" value="Laptop">
+          <span class="item-icon">💻</span>
+          <span>Laptop</span>
+        </label>
+        <label class="item-checkbox" id="item-phone">
+          <input type="checkbox" value="Phone">
+          <span class="item-icon">📱</span>
+          <span>Phone</span>
+        </label>
+        <label class="item-checkbox" id="item-headphones">
+          <input type="checkbox" value="Headphones">
+          <span class="item-icon">🎧</span>
+          <span>Headphones</span>
+        </label>
+        <label class="item-checkbox" id="item-keyboard">
+          <input type="checkbox" value="Keyboard">
+          <span class="item-icon">⌨️</span>
+          <span>Keyboard</span>
+        </label>
+        <label class="item-checkbox" id="item-mouse">
+          <input type="checkbox" value="Mouse">
+          <span class="item-icon">🖱️</span>
+          <span>Mouse</span>
+        </label>
+        <label class="item-checkbox" id="item-monitor">
+          <input type="checkbox" value="Monitor">
+          <span class="item-icon">🖥️</span>
+          <span>Monitor</span>
+        </label>
+      </div>
+      <button id="submitBtn" onclick="placeOrder()">
+        <span class="btn-text">Submit Order</span>
+        <span class="btn-icon">→</span>
+      </button>
+    </div>
+
+    <!-- stats -->
+    <div class="stats-row">
+      <div class="stat-box glass" id="stat-total">
+        <span class="stat-number" id="totalCount">0</span>
+        <span class="stat-label">Total Orders</span>
+      </div>
+      <div class="stat-box glass" id="stat-pending">
+        <span class="stat-number pending" id="pendingCount">0</span>
+        <span class="stat-label">Pending</span>
+        <div class="stat-indicator pending-ind"></div>
+      </div>
+      <div class="stat-box glass" id="stat-processing">
+        <span class="stat-number processing" id="processingCount">0</span>
+        <span class="stat-label">Processing</span>
+        <div class="stat-indicator processing-ind"></div>
+      </div>
+      <div class="stat-box glass" id="stat-done">
+        <span class="stat-number done" id="doneCount">0</span>
+        <span class="stat-label">Completed</span>
+        <div class="stat-indicator done-ind"></div>
+      </div>
+    </div>
+
+    <!-- orders table -->
+    <div class="card glass" id="orders-card">
+      <div class="card-header">
+        <h2>Recent Orders</h2>
+        <span class="card-tag live-tag">
+          <span class="live-dot"></span>
+          Live
+        </span>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Order ID</th>
+              <th>Items</th>
+              <th>📧 Email</th>
+              <th>📊 Analytics</th>
+              <th>📦 Inventory</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody id="ordersBody">
+            <tr>
+              <td colspan="6" class="empty-msg">
+                <div class="empty-state">
+                  <span class="empty-icon">📭</span>
+                  <span>No orders yet — place one above!</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- footer -->
+    <footer class="footer">
+      <span>Built with Node.js · Express · Redis · Docker</span>
+    </footer>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,795 +1,234 @@
-# 🚀 Distributed Job Queue using Redis & Node.js
+# ⚡ Redis PubSub Order Pipeline
 
-> A production-inspired distributed background job processing system built with **Node.js, Express, Redis, and Docker**.
-
-This project demonstrates how modern applications process time-consuming tasks asynchronously using a distributed job queue. Instead of making users wait for expensive operations (emails, image processing, report generation, AI tasks, etc.), requests are placed into a queue and processed by background workers.
+A distributed order processing system using **Redis Pub/Sub fan-out** with independent worker services, built from first principles with **Node.js, Express, TypeScript, and Docker**.
 
 ---
 
-# Table of Contents
+## What This Does
 
-* Introduction
-* Why Job Queues?
-* Features
-* System Architecture
-* Tech Stack
-* Folder Structure
-* How It Works
-* Request Lifecycle
-* Redis Data Flow
-* API Endpoints
-* Queue Flow
-* Worker Flow
-* Scaling
-* Failure Handling
-* Retry Mechanism
-* Future Improvements
-* Running the Project
-* Docker Setup
-* Testing
-* Performance
-* Interview Questions
-* Design Decisions
-* Real World Applications
-* Future Enhancements
-* Learning Outcomes
-
----
-
-# Introduction
-
-Traditional APIs process every request immediately.
-
-Example:
+When a user places an order, the API server publishes the order ID to a Redis Pub/Sub channel. Three independent worker services — **Email**, **Analytics**, and **Inventory** — all subscribe to this channel and process the order simultaneously. A real-time dashboard shows the lifecycle of each order as it flows through the pipeline.
 
 ```
-User
-   |
-   | POST /send-email
-   |
-Express
-   |
-Email Service
-   |
-SMTP
-   |
-Response
-```
-
-If sending an email takes **5 seconds**, the user waits 5 seconds.
-
-This is inefficient.
-
-Instead, production systems use **Background Job Queues.**
-
-```
-User
-   |
-POST /send-email
-   |
-Express
-   |
-Redis Queue
-   |
-202 Accepted
-   |
-Worker
-   |
-SMTP
-```
-
-Now the user gets an instant response while the worker completes the task in the background.
-
----
-
-# Why Job Queues?
-
-Without a queue:
-
-* Slow API responses
-* Thread blocking
-* Poor scalability
-* Bad user experience
-
-With a queue:
-
-* Fast responses
-* Better throughput
-* Horizontal scaling
-* Reliable processing
-
----
-
-# Features
-
-✅ REST API
-
-✅ Redis Queue
-
-✅ Background Worker
-
-✅ Docker Support
-
-✅ Multiple Workers
-
-✅ Retry Support
-
-✅ Failed Job Handling
-
-✅ Queue Monitoring
-
-✅ Logging
-
-✅ Production Inspired Architecture
-
----
-
-# Tech Stack
-
-* Node.js
-* Express.js
-* Redis
-* Docker
-* Docker Compose
-
----
-
-# System Architecture
-
-```
-                Client
-                   |
-                   |
-          POST /generate-report
-                   |
-            Express API Server
-                   |
-           Push Job into Redis
-                   |
-        --------------------------
-        |                        |
-      Worker 1               Worker 2
-        |                        |
-        --------------------------
-                   |
-             Process Job
-                   |
-             Database/API
+                    ┌──────────────┐
+                    │   Dashboard  │
+                    │  (polls API) │
+                    └──────┬───────┘
+                           │
+                    ┌──────▼───────┐
+                    │  Express API │
+                    │  POST /order │
+                    └──────┬───────┘
+                           │
+                     PUBLISH orders
+                           │
+                    ┌──────▼───────┐
+                    │  Redis 7     │
+                    │  Pub/Sub     │
+                    └──┬───┬───┬───┘
+                       │   │   │
+          ┌────────────┘   │   └────────────┐
+          ▼                ▼                ▼
+   ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+   │   📧 Email  │ │ 📊 Analytics│ │ 📦 Inventory│
+   │   Worker    │ │   Worker    │ │   Worker    │
+   └─────────────┘ └─────────────┘ └─────────────┘
 ```
 
 ---
 
-# Folder Structure
+## Why Pub/Sub (Not a Job Queue)
 
+This project uses **Redis Pub/Sub** intentionally, not `LPUSH`/`BRPOP` queue semantics.
+
+**Pub/Sub fan-out** is the right pattern here because every order needs to be processed by **all three** services simultaneously. A work queue (`BRPOP`) delivers each job to exactly **one** competing consumer — which would mean only one service processes each order.
+
+| Pattern | Delivery | Use Case |
+|---------|----------|----------|
+| **Pub/Sub** (this project) | Every subscriber gets every message | Fan-out to multiple independent services |
+| **Work Queue** (`BRPOP`) | One consumer per message | Load balancing across identical workers |
+
+---
+
+## Tech Stack
+
+- **Runtime**: Node.js + TypeScript
+- **API**: Express.js
+- **Messaging**: Redis 7 Pub/Sub
+- **Storage**: Redis Hashes + Lists
+- **Containers**: Docker + Docker Compose
+- **Frontend**: Vanilla HTML/CSS/JS
+
+---
+
+## Quick Start
+
+### With Docker (recommended)
+
+```bash
+docker compose up --build
 ```
-project/
 
-src/
-│
-├── app.js
-├── routes/
-├── controllers/
-├── worker/
-├── queue/
-├── redis/
-├── middleware/
-├── utils/
-│
-docker-compose.yml
-README.md
+This starts **all 5 services** with one command:
+
+| Container | Role |
+|-----------|------|
+| `pipeline_redis` | Redis 7 Alpine |
+| `pipeline_api` | Express API (port 3000) |
+| `pipeline_worker_email` | Email service worker |
+| `pipeline_worker_analytics` | Analytics service worker |
+| `pipeline_worker_inventory` | Inventory service worker |
+
+Open **http://localhost:3000** to use the dashboard.
+
+### Without Docker
+
+```bash
+# Start Redis separately
+docker run -d -p 6379:6379 redis:7-alpine
+
+# Install dependencies
+npm install
+
+# Terminal 1 — API server
+npm run dev
+
+# Terminal 2-4 — Workers (each in separate terminal)
+npm run worker:email
+npm run worker:analytics
+npm run worker:inventory
 ```
 
 ---
 
-# Queue Flow
+## API Endpoints
 
-Step 1
+### `POST /api/order`
 
-User sends
+Create a new order and publish it to all workers.
 
-```
-POST /jobs
-```
-
-Body
-
+**Request**
 ```json
-{
-    "type":"email",
-    "email":"john@gmail.com"
-}
+{ "items": ["Laptop", "Phone"] }
 ```
 
----
-
-Step 2
-
-Express validates the request.
-
----
-
-Step 3
-
-Instead of processing immediately
-
-```
-sendEmail()
+**Response** — `202 Accepted`
+```json
+{ "message": "Order placed", "orderId": "a1b2c3d4" }
 ```
 
-it pushes the job
+### `GET /api/orders`
 
-```
-LPUSH jobs
-```
+Returns the last 50 orders with per-service status.
 
-Redis
-
-```
-jobs
-
+**Response** — `200 OK`
+```json
 [
- Job5
- Job4
- Job3
- Job2
- Job1
+  {
+    "id": "a1b2c3d4",
+    "items": ["Laptop", "Phone"],
+    "createdAt": "2026-07-29T18:00:00.000Z",
+    "email": "done",
+    "analytics": "processing",
+    "inventory": "done"
+  }
 ]
 ```
 
----
+### `GET /api/order/:id`
 
-Step 4
+Returns a single order by ID.
 
-API instantly responds
-
-```
-202 Accepted
-```
-
-User does not wait.
+**Response** — `200 OK` or `404 Not Found`
 
 ---
 
-Step 5
+## Redis Usage
 
-Worker continuously waits.
+### Data Structures
 
-```
-BRPOP jobs
-```
+| Type | Key | Purpose |
+|------|-----|---------|
+| Hash | `order:{id}` | Stores order state (id, items, createdAt, per-service status) |
+| List | `allOrders` | Tracks all order IDs for retrieval |
+| Channel | `orders` | Pub/Sub channel for broadcasting order IDs to workers |
 
-`BRPOP` blocks until a new job arrives.
+### Commands Used
 
-No CPU is wasted.
-
----
-
-Step 6
-
-Worker receives
-
-```
-Job5
-```
-
-Processes it
-
-```
-Send Email
-
-Generate PDF
-
-Resize Image
-
-AI Task
-
-etc.
-```
+| Command | Where | Why |
+|---------|-------|-----|
+| `HSET` | API + Workers | Write order fields and update service status |
+| `HGETALL` | API | Read full order state for display |
+| `LPUSH` | API | Track order IDs |
+| `LRANGE` | API | Retrieve recent order IDs |
+| `PUBLISH` | API | Broadcast order to Pub/Sub channel |
+| `SUBSCRIBE` | Workers | Listen for new orders |
 
 ---
 
-# Why BRPOP?
-
-Instead of
-
-```js
-while(true){
-
-checkQueue()
-
-}
-```
-
-which wastes CPU,
-
-Redis provides
+## Order Lifecycle
 
 ```
-BRPOP
+pending → processing → done
 ```
 
-The worker sleeps until a job arrives.
+Each service field (`email`, `analytics`, `inventory`) transitions independently:
+
+1. **Created** — API stores order with all fields set to `pending`
+2. **Published** — `PUBLISH orders {orderId}`
+3. **Processing** — Each worker sets its field to `processing`
+4. **Done** — After simulated work, each worker sets its field to `done`
 
 ---
 
-# Redis Data Flow
+## Folder Structure
 
 ```
-LPUSH jobs Job1
-
-Queue
-
-Job1
-```
-
-```
-LPUSH jobs Job2
-
-Queue
-
-Job2
-Job1
-```
-
-Worker
-
-```
-BRPOP jobs
-```
-
-Queue becomes
-
-```
-Job2
+├── docker-compose.yaml          # Full stack: Redis + API + 3 workers
+├── Dockerfile                   # Shared image for API and workers
+├── .dockerignore
+├── package.json
+├── tsconfig.json
+├── public/                      # Dashboard UI (served by Express)
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
+└── src/
+    ├── index.ts                 # Express server (3 routes)
+    ├── redis.ts                 # Redis client + subscriber factory
+    ├── EmailService/main.ts     # Email worker
+    ├── AnalyticService/main.ts  # Analytics worker
+    └── InventoryUpdatedService/main.ts  # Inventory worker
 ```
 
 ---
 
-# Request Lifecycle
+## System Design Concepts Demonstrated
 
-```
-Client
-
-↓
-
-Express
-
-↓
-
-Validate
-
-↓
-
-Redis Queue
-
-↓
-
-202 Accepted
-
-↓
-
-Worker
-
-↓
-
-Business Logic
-
-↓
-
-Success
-```
+- **Pub/Sub fan-out** — one message delivered to multiple independent consumers
+- **Event-driven architecture** — workers react to Redis messages, no polling
+- **Asynchronous processing** — API returns immediately, workers process in background
+- **State machine** — per-service `pending → processing → done` transitions
+- **Service decomposition** — each worker is an independent process
+- **Containerization** — full stack orchestrated via Docker Compose
 
 ---
 
-# API Endpoints
+## Known Limitations
 
-## Add Job
+This is a learning project built from first principles. The following are intentionally not implemented:
 
-```
-POST /jobs
-```
+- **No retry logic or Dead Letter Queue** — failed operations are not retried
+- **No error handling in workers** — simulated work always succeeds
+- **No graceful shutdown** — workers don't handle `SIGTERM`
+- **At-most-once delivery** — if a worker is offline, it misses messages (Pub/Sub limitation)
+- **No authentication or rate limiting** — API is open
+- **No tests** — focus was on architecture, not test coverage
+- **No persistence for messages** — Redis Pub/Sub is fire-and-forget
 
-Response
-
-```json
-{
-    "message":"Job queued"
-}
-```
+For production, consider Redis Streams with consumer groups, BullMQ, RabbitMQ, or Kafka.
 
 ---
 
-## Queue Length
+## License
 
-```
-GET /queue
-```
-
----
-
-## Worker Health
-
-```
-GET /health
-```
-
----
-
-## Retry Failed Jobs
-
-```
-POST /retry
-```
-
----
-
-# Horizontal Scaling
-
-One worker
-
-```
-Queue
-
-↓
-
-Worker
-```
-
-100 jobs
-
-One worker processes sequentially.
-
----
-
-Three workers
-
-```
-Queue
-
-↓
-
-Worker A
-
-Worker B
-
-Worker C
-```
-
-Jobs are processed in parallel.
-
-No application code changes.
-
-Only add more workers.
-
-This is horizontal scaling.
-
----
-
-# Failure Handling
-
-Suppose email service fails.
-
-```
-Worker
-
-↓
-
-SMTP Error
-```
-
-Instead of losing the job
-
-Move it into
-
-```
-failed_jobs
-```
-
-Redis List
-
----
-
-# Retry Mechanism
-
-```
-Job
-
-↓
-
-Attempt 1
-
-↓
-
-Fail
-
-↓
-
-Attempt 2
-
-↓
-
-Fail
-
-↓
-
-Attempt 3
-
-↓
-
-Move to Dead Letter Queue
-```
-
----
-
-# Dead Letter Queue
-
-A Dead Letter Queue stores permanently failed jobs.
-
-```
-jobs
-
-↓
-
-worker
-
-↓
-
-failed_jobs
-```
-
-Engineers inspect them later.
-
----
-
-# Performance
-
-Without Queue
-
-```
-Request
-
-↓
-
-5 seconds
-```
-
-With Queue
-
-```
-Request
-
-↓
-
-40 ms
-```
-
-Heavy work happens later.
-
----
-
-# Real World Use Cases
-
-Sending Emails
-
-Invoice Generation
-
-PDF Generation
-
-Image Compression
-
-Video Encoding
-
-AI Inference
-
-Payment Webhooks
-
-Push Notifications
-
-Analytics Processing
-
-Order Processing
-
-SMS
-
-Report Generation
-
----
-
-# Why Redis?
-
-Redis is
-
-* In-memory
-* Extremely fast
-* Atomic
-* Shared across servers
-* Supports blocking operations
-
-Commands used
-
-```
-LPUSH
-
-BRPOP
-
-LLEN
-
-LRANGE
-```
-
----
-
-# Why Not Database?
-
-Database polling
-
-```
-SELECT *
-
-every second
-```
-
-is slow.
-
-Redis supports
-
-```
-BRPOP
-```
-
-which blocks efficiently.
-
----
-
-# Production Improvements
-
-Redis Streams
-
-BullMQ
-
-RabbitMQ
-
-Apache Kafka
-
-Priority Queue
-
-Delayed Jobs
-
-Rate Limiting
-
-Monitoring Dashboard
-
-Distributed Locking
-
-Job Scheduling
-
----
-
-# Possible Future Features
-
-Email Queue
-
-Image Queue
-
-Video Queue
-
-Notification Queue
-
-Priority Queue
-
-Cron Jobs
-
-Dead Letter Queue
-
-Metrics Dashboard
-
-WebSocket Updates
-
-Prometheus
-
-Grafana
-
-OpenTelemetry
-
----
-
-# Interview Questions
-
-## Why use a Job Queue?
-
-To move long-running tasks outside the request-response cycle and improve response time, scalability, and reliability.
-
----
-
-## Why Redis?
-
-Fast in-memory operations, atomic commands, blocking queue support, and shared state across multiple servers.
-
----
-
-## Why LPUSH + BRPOP?
-
-`LPUSH` inserts new jobs efficiently.
-
-`BRPOP` lets workers sleep until work arrives, avoiding wasteful polling.
-
----
-
-## Why not process jobs inside Express?
-
-Express should return responses quickly. Heavy tasks increase latency and reduce throughput.
-
----
-
-## What if multiple workers consume the queue?
-
-Each job is delivered to only one worker because `BRPOP` removes it atomically.
-
----
-
-## Can jobs be lost?
-
-Yes, with a simple Redis List implementation. If a worker crashes after popping a job but before finishing it, that job can be lost. Production systems address this with acknowledgements, visibility timeouts, or more advanced tools such as Redis Streams, BullMQ, RabbitMQ, or Kafka.
-
----
-
-## What is a Dead Letter Queue?
-
-A queue that stores jobs which have permanently failed after the maximum retry limit.
-
----
-
-## How do you scale?
-
-Run more worker processes.
-
-No API code changes are required.
-
----
-
-## Why not Kafka?
-
-Kafka is designed for durable event streaming and very high throughput.
-
-For a lightweight background job system, Redis is simpler and faster to implement.
-
----
-
-## Difference between Pub/Sub and Job Queue?
-
-**Pub/Sub**
-
-* Every subscriber receives the message.
-* Best for notifications and event broadcasting.
-* Messages are not retained for late subscribers.
-
-**Job Queue**
-
-* One worker processes each job.
-* Best for background task processing.
-* Jobs remain in the queue until a worker consumes them.
-
----
-
-## Learning Outcomes
-
-After completing this project you will understand:
-
-* Distributed systems basics
-* Producer–Consumer pattern
-* Background processing
-* Asynchronous architecture
-* Redis Lists
-* Blocking operations
-* Horizontal scaling
-* Worker processes
-* Failure recovery concepts
-* Retry strategies
-* Dead Letter Queues
-* Production queue design
-
----
-
-# Final Thoughts
-
-This project is intentionally built from first principles instead of relying on libraries like BullMQ. The goal is to understand **how distributed job queues work internally**, including producers, consumers, Redis data structures, worker scaling, and failure scenarios. Once these fundamentals are clear, migrating to production-grade tools such as BullMQ, RabbitMQ, or Kafka becomes much easier.
+ISC

@@ -1,0 +1,66 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: pipeline_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: .
+    container_name: pipeline_api
+    ports:
+      - "3000:3000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker-email:
+    build: .
+    container_name: pipeline_worker_email
+    command: ["npx", "tsx", "src/EmailService/main.ts"]
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker-analytics:
+    build: .
+    container_name: pipeline_worker_analytics
+    command: ["npx", "tsx", "src/AnalyticService/main.ts"]
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker-inventory:
+    build: .
+    container_name: pipeline_worker_inventory
+    command: ["npx", "tsx", "src/InventoryUpdatedService/main.ts"]
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis_data:
